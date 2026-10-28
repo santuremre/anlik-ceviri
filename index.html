@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Anlık Çeviri</title>
+<meta name="theme-color" content="#14161b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Çeviri">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="ikon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="ikon-180.png">
+<style>
+:root {
+  --bg: #f4f3ef; --panel: #ffffff; --ink: #1b1c1f; --muted: #6d6c68; --line: #e2e0da;
+  --tr: #c8102e; --trbg: #fdeff1; --zh: #b8860b; --zhbg: #fdf6e3; --accent: #1f6feb; --bad: #b42318;
+  --ok: #1f7a4d; --seviye: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14161b; --panel: #1d2027; --ink: #eceae4; --muted: #9a988f; --line: #2d3039;
+    --trbg: #2a1519; --zhbg: #2a2312; --tr: #ff6b81; --zh: #f1c75b; --accent: #6ea8ff; --bad: #ff8a7a; --ok: #6fd3a0; }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); overscroll-behavior: none; }
+button { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 17px; margin: 0 auto 0 4px; font-weight: 650; }
+.ikon { background: none; border: 0; width: 40px; height: 40px; border-radius: 10px; font-size: 19px; cursor: pointer; }
+.ikon:active, .ikon[aria-pressed="true"] { background: var(--bg); }
+
+/* karşılıklı mod: üst yarı karşıdaki Çinli için ters çevrilmiş */
+#ust-panel { display: none; }
+body.karsilikli #ust-panel { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; transform: rotate(180deg);
+  border-bottom: 2px dashed var(--line); background: var(--panel); }
+body.karsilikli header { display: none; }
+#ust-durum { text-align: center; color: var(--muted); padding: 8px; font-size: 15px; }
+#ust-liste { overflow-y: auto; padding: 8px 14px; flex: 1; }
+#ust-liste .tur { margin: 8px 0; padding: 10px 14px; border-radius: 14px; max-width: 92%; }
+#ust-liste .tur.karsi { background: var(--zhbg); margin-right: auto; }
+#ust-liste .tur.kendi { background: var(--bg); margin-left: auto; opacity: .75; }
+#ust-liste .ceviri { font-size: 24px; line-height: 1.45; }
+
+main { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+#liste { flex: 1; overflow-y: auto; padding: 10px 12px 16px; -webkit-overflow-scrolling: touch; }
+#bos { color: var(--muted); text-align: center; margin: 18vh 24px 0; line-height: 1.6; }
+#bos b { color: var(--ink); }
+.tur { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 10px 14px; margin: 10px 0; max-width: 94%; }
+.tur.tr { border-left: 4px solid var(--tr); margin-right: auto; }
+.tur.zh { border-right: 4px solid var(--zh); margin-left: auto; }
+.tur .ust { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.tur .kaynak { font-size: 15px; color: var(--muted); line-height: 1.45; }
+.tur .ceviri { font-size: 21px; line-height: 1.45; margin-top: 4px; font-weight: 500; white-space: pre-wrap; }
+.tur.tr .ceviri { color: var(--ink); }
+.tur.zh .ceviri { color: var(--ink); }
+.bekle { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.bekle i { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: don 0.8s linear infinite; }
+@keyframes don { to { transform: rotate(360deg); } }
+.hata { color: var(--bad); font-size: 14px; margin-top: 6px; }
+.hata button, .eylem button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 3px 10px; margin-left: 6px; cursor: pointer; }
+.eylem { text-align: right; margin-top: 2px; }
+.eylem button { border: 0; background: none; font-size: 16px; opacity: .6; }
+
+footer { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+#durum { font-size: 14px; color: var(--muted); }
+#mik { width: 76px; height: 76px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 30px; cursor: pointer;
+  box-shadow: 0 0 0 calc(var(--seviye) * 18px) color-mix(in srgb, var(--accent) 30%, transparent); transition: box-shadow 60ms linear, background .2s; }
+body.acik #mik { background: var(--bad); }
+body[data-durum="soyluyor"] #mik { background: var(--ok); }
+#gonder { justify-self: end; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 8px 12px; font-size: 14px; visibility: hidden; cursor: pointer; }
+body[data-durum="konusma"] #gonder { visibility: visible; }
+
+dialog { border: 0; border-radius: 18px; padding: 0; width: min(560px, 94vw); max-height: 90vh; background: var(--panel); color: var(--ink); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+.dlg { padding: 18px 18px 14px; }
+.dlg h2 { margin: 0 0 4px; font-size: 18px; }
+label { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 5px; }
+input[type=password], input[type=text], select, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; }
+textarea { min-height: 70px; resize: vertical; }
+input[type=range] { width: 100%; }
+.ipucu { font-size: 13px; color: var(--muted); margin: 4px 0 0; line-height: 1.45; }
+.ipucu a { color: var(--accent); }
+.ust-mesaj { color: var(--accent); font-size: 14px; }
+.dugmeler { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+.dugmeler button { border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 10px 16px; cursor: pointer; }
+.dugmeler button.ana { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+#test-sonuc p { margin: 6px 0; font-size: 14px; } #test-sonuc .ok { color: var(--ok); } #test-sonuc .hata { color: var(--bad); }
+.gecmis-satir { display: flex; gap: 6px; align-items: stretch; margin: 8px 0; }
+.gecmis-satir .ac { flex: 1; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; cursor: pointer; font-size: 14px; }
+.gecmis-satir .ac span { color: var(--muted); }
+.gecmis-satir button:not(.ac) { border: 1px solid var(--line); background: var(--bg); border-radius: 12px; width: 44px; cursor: pointer; }
+</style>
+</head>
+<body data-durum="hazir">
+<header>
+  <h1>Anlık Çeviri</h1>
+  <button class="ikon" id="karsilikli" title="Karşılıklı mod (telefonu masaya koyun)" aria-pressed="false">⇅</button>
+  <button class="ikon" id="yeni" title="Yeni sohbet">＋</button>
+  <button class="ikon" id="disa-aktar" title="Bu sohbeti dışa aktar">⤴︎</button>
+  <button class="ikon" id="gecmis-ac" title="Kayıtlı sohbetler">🕘</button>
+  <button class="ikon" id="ayar-ac" title="Ayarlar">⚙︎</button>
+</header>
+
+<div id="ust-panel" aria-label="Karşı taraf için Çince görünüm">
+  <div id="ust-durum">点击开始</div>
+  <div id="ust-liste"></div>
+</div>
+
+<main>
+  <div id="liste">
+    <div id="bos">
+      <b>Mikrofona dokunun ve konuşmaya başlayın.</b><br>
+      Dil seçmeye gerek yok: Türkçe konuşulursa Çinceye, Çince konuşulursa Türkçeye çevrilir.
+      Konuşan durunca çeviri otomatik gelir ve sesli okunur.<br><br>
+      <span lang="zh-CN">请直接说中文，翻译会自动显示并朗读。</span>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div id="durum">Başlatmak için dokunun</div>
+  <button id="mik" aria-label="Dinlemeyi başlat / durdur">🎙</button>
+  <button id="gonder" title="Konuşma bitmedi sayılıyorsa hemen çevir">Şimdi çevir</button>
+</footer>
+
+<dialog id="ayarlar">
+  <form method="dialog" id="ayar-form" class="dlg">
+    <h2>Ayarlar</h2>
+    <p class="ust-mesaj" id="ayar-mesaj"></p>
+    <label for="anthropicKey">Claude (Anthropic) API anahtarı</label>
+    <input type="password" id="anthropicKey" name="anthropicKey" autocomplete="off" placeholder="sk-ant-…">
+    <p class="ipucu"><a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Anahtar al</a> · Çeviri için</p>
+    <label for="elevenKey">ElevenLabs API anahtarı</label>
+    <input type="password" id="elevenKey" name="elevenKey" autocomplete="off" placeholder="sk_…">
+    <p class="ipucu"><a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">Anahtar al</a> · Konuşmayı yazıya dökmek ve isteğe bağlı doğal ses için.
+      Anahtarlar yalnızca bu telefonda saklanır, hiçbir sunucuya kaydedilmez.</p>
+    <label for="model">Çeviri modeli</label>
+    <select id="model" name="model"></select>
+    <label for="seslendirme">Çeviriyi sesli oku</label>
+    <select id="seslendirme" name="seslendirme">
+      <option value="cihaz">Telefonun sesi (en hızlı, ücretsiz)</option>
+      <option value="elevenlabs">ElevenLabs doğal ses (daha doğal, biraz daha yavaş)</option>
+      <option value="kapali">Kapalı (sadece yazı)</option>
+    </select>
+    <label for="elevenSes">ElevenLabs sesi</label>
+    <select id="elevenSes" name="elevenSes"></select>
+    <label for="bekleme">Konuşma bitti sayılması için sessizlik: <span id="bekleme-deger"></span></label>
+    <input type="range" id="bekleme" name="bekleme" min="500" max="2000" step="100">
+    <p class="ipucu">Kısa: daha hızlı çeviri ama düşünürken durunca cümleyi böler. Uzun: daha bütünlüklü cümleler.</p>
+    <label for="baglam">Konuşmanın bağlamı (isteğe bağlı)</label>
+    <textarea id="baglam" name="baglam" placeholder="Örn. Kumaş fabrikasıyla sipariş görüşmesi. Montegro = bizim marka. Wang Bey = fabrika sahibi."></textarea>
+    <p class="ipucu">İsimler, ürünler ve terimler çeviriyi daha doğru yapar.</p>
+    <div id="test-alan" hidden><label>Test: ses dosyasını mikrofon yerine kullan</label><input type="file" id="test-dosya" accept="audio/*"></div>
+    <div id="test-sonuc"></div>
+    <div class="dugmeler">
+      <button type="button" id="anahtar-test">Anahtarları test et</button>
+      <button value="iptal" formnovalidate>Kapat</button>
+      <button class="ana" value="kaydet">Kaydet</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="gecmis">
+  <div class="dlg">
+    <h2>Kayıtlı sohbetler</h2>
+    <p class="ipucu">Sohbetler bu telefonda saklanır. Kalıcı yedek için ⤴︎ ile dışa aktarın (Dosyalar, WhatsApp, e-posta…).</p>
+    <div id="gecmis-liste"></div>
+    <div class="dugmeler"><button onclick="this.closest('dialog').close()">Kapat</button></div>
+  </div>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

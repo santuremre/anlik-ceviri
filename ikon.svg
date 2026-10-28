@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#14161b"/>
+  <rect x="64" y="104" width="248" height="168" rx="40" fill="#c8102e"/>
+  <path d="M120 272 L104 330 L170 272 Z" fill="#c8102e"/>
+  <text x="188" y="218" font-family="Helvetica, Arial, sans-serif" font-size="96" font-weight="700" fill="#fff" text-anchor="middle">TR</text>
+  <rect x="200" y="240" width="248" height="168" rx="40" fill="#f1c75b"/>
+  <path d="M392 408 L408 466 L342 408 Z" fill="#f1c75b"/>
+  <text x="324" y="356" font-family="PingFang SC, Heiti SC, sans-serif" font-size="96" font-weight="700" fill="#14161b" text-anchor="middle">中</text>
+</svg>

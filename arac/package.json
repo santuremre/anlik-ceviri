@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "description": "Claude SDK'sını uygulamaya gömülü tek dosya olarak paketler (Çin'de CDN'e bağımlı kalmamak için).",
+  "scripts": {
+    "vendor": "esbuild giris.js --bundle --format=esm --platform=browser --minify --outfile=../vendor/anthropic.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "esbuild": "0.25.10"
+  }
+}

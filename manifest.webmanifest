@@ -1,0 +1,18 @@
+{
+  "name": "Anlık Çeviri — Türkçe ⇄ Çince",
+  "short_name": "Çeviri",
+  "description": "Türkçe ve Çince konuşmaları otomatik algılayıp anında çeviren, sohbetleri kaydeden tercüman.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14161b",
+  "theme_color": "#14161b",
+  "lang": "tr",
+  "icons": [
+    { "src": "ikon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "ikon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "ikon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
