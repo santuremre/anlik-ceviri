@@ -1,11 +1,11 @@
 // Uygulama kabuğunu önbelleğe alır: bir kez açıldıktan sonra sayfa internetsiz de yüklenir
 // (çeviri için yine internet gerekir). Yeni sürüm yayınlanınca SURUM'ü artırın.
-const SURUM = 'v1';
+const SURUM = 'v2';
 const DOSYALAR = ['./', 'index.html', 'app.js', 'yakala-worklet.js', 'vendor/anthropic.js',
   'manifest.webmanifest', 'ikon.svg', 'ikon-180.png', 'ikon-192.png', 'ikon-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SURUM).then(c => c.addAll(DOSYALAR)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SURUM).then(c => c.addAll(DOSYALAR.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()

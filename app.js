@@ -4,25 +4,29 @@
 import Anthropic from './vendor/anthropic.js';
 
 const MODELLER = {
-  'claude-opus-5-5': 'Claude Opus 5.5 — en yüksek kalite',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5 — biraz daha hızlı',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5 — hızlı (önerilen)',
+  'claude-opus-5-5': 'Claude Opus 5.5 — en titiz, biraz daha yavaş',
 };
 const VARSAYILAN = {
-  anthropicKey: '', elevenKey: '', model: 'claude-opus-5-5', seslendirme: 'cihaz',
-  elevenSes: '', bekleme: 900, baglam: '', karsilikli: false,
+  anthropicKey: '', elevenKey: '', model: 'claude-sonnet-5-5', seslendirme: 'cihaz',
+  elevenSes: '', bekleme: 900, baglam: '', karsilikli: false, surum: 2,
 };
 const DIL_ADI = { tr: 'Türkçe', zh: 'Çince', diger: 'Diğer' };
 const BAYRAK = { tr: '🇹🇷', zh: '🇨🇳', diger: '🌐' };
 const $ = s => document.querySelector(s);
 // ?test=kuru: API çağırmadan arayüzü ve konuşma bölmeyi denemek için sahte yanıtlar
 const KURU = new URLSearchParams(location.search).get('test') === 'kuru';
+const KURU_STT_MS = +(new URLSearchParams(location.search).get('stt') || 600);
 const bekle = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------------------------------------------------------------- ayarlar
 let A = ayarOku();
 function ayarOku() {
-  try { return { ...VARSAYILAN, ...JSON.parse(localStorage.getItem('ayarlar') || '{}') }; }
-  catch { return { ...VARSAYILAN }; }
+  let a;
+  try { a = JSON.parse(localStorage.getItem('ayarlar') || '{}'); } catch { a = {}; }
+  // sürüm 2: eski varsayılan Opus'tu; ölçümde Sonnet hem daha hızlı hem çeviride eşit kalitede
+  if (!a.surum && a.model === 'claude-opus-5-5') a.model = 'claude-sonnet-5-5';
+  return { ...VARSAYILAN, ...a, surum: 2 };
 }
 function ayarYaz() { try { localStorage.setItem('ayarlar', JSON.stringify(A)); } catch {} }
 
@@ -67,13 +71,15 @@ function kaydet(s = sohbet, hemen = false) {
 }
 
 // ---------------------------------------------------------------- ses yakalama + konuşma sonu algılama
+const ERKEN_MS = 300;
 class Dinleyici {
-  constructor({ onSoz, onSeviye, onDurum }) {
-    Object.assign(this, { onSoz, onSeviye, onDurum });
+  constructor({ onSoz, onErken, onSeviye, onDurum }) {
+    Object.assign(this, { onSoz, onErken, onSeviye, onDurum });
     this.duraklat = false;
     this.sifirla();
   }
   sifirla() {
+    this.erkenIptal();
     this.taban = null; this.konusma = false; this.ardisik = 0;
     this.onceki = []; this.parcalar = []; this.sesliKare = 0; this.sessizMs = 0;
   }
@@ -134,25 +140,38 @@ class Dinleyici {
       return;
     }
     this.parcalar.push(x);
-    if (ses) this.sesliKare++;
+    if (ses) { this.sesliKare++; this.erkenIptal(); }
     // sessizlik sayacını yalnızca açık konuşma sıfırlar; aradaki belirsiz kareler yarım sayılır
     // (tek tük gürültü karesi cümle sonunu kaçırtmasın)
     this.sessizMs = ses ? 0 : this.sessizMs + (sessiz ? 20 : 10);
+    // kısa duraksamada sesi şimdiden yazıya dökmeye başla; kişi devam ederse iptal edilir,
+    // etmezse "bekleme" süresi dolduğunda sonuç çoğunlukla hazırdır
+    if (!this.erken && this.sessizMs >= ERKEN_MS && this.sessizMs < this.bekleme && this.yeterli && this.onErken)
+      this.erken = { sesli: this.sesliKare, is: this.onErken(this.kirpik(), this.ctx.sampleRate) };
     if (this.sessizMs >= this.bekleme || this.parcalar.length * 20 >= 30000) this.bitir();
   }
+  get yeterli() { return this.sesliKare * 20 >= 350; }   // öksürük, kapı sesi vb. gönderme
+  kirpik() {   // sondaki sessizliği 250 ms'ye kırp
+    const fazla = Math.max(0, Math.floor((this.sessizMs - 250) / 20));
+    return fazla ? this.parcalar.slice(0, -fazla) : this.parcalar.slice();
+  }
+  erkenIptal() { if (this.erken) { this.erken.is.iptal(); this.erken = null; } }
   bitir() {
     if (!this.konusma) return;
-    const fazla = Math.max(0, Math.floor((this.sessizMs - 250) / 20));  // sondaki sessizliği kırp
-    const parcalar = fazla ? this.parcalar.slice(0, -fazla) : this.parcalar;
-    const yeterli = this.sesliKare * 20 >= 350;   // öksürük, kapı sesi vb. gönderme
+    const parcalar = this.kirpik(), yeterli = this.yeterli;
+    // erken başlatılan istek aynı sesi kapsıyorsa (arada yeni konuşma yoksa) onu kullan
+    const hazir = this.erken && this.erken.sesli === this.sesliKare ? this.erken.is.sonuc : null;
+    if (!hazir) this.erkenIptal();
+    this.erken = null;
     this.konusma = false; this.parcalar = []; this.sesliKare = 0; this.sessizMs = 0; this.ardisik = 0;
     this.onDurum('dinliyor');
-    if (yeterli && this.ctx) this.onSoz(parcalar, this.ctx.sampleRate, this.okurkenBasladi || this.duraklat);
+    if (yeterli && this.ctx) this.onSoz(parcalar, this.ctx.sampleRate, this.okurkenBasladi || this.duraklat, hazir);
   }
   zorla() { this.bitir(); }
 }
 
-function wav16k(parcalar, sr) {
+// 16 kHz'e indir, kısık/uzak konuşanı yükselt (en fazla 8 kat) → Int16
+function ornekle16k(parcalar, sr) {
   const n = parcalar.reduce((a, p) => a + p.length, 0);
   const x = new Float32Array(n);
   let o = 0, tepe = 0;
@@ -166,39 +185,77 @@ function wav16k(parcalar, sr) {
     y[i] = s / (b - a);
     tepe = Math.max(tepe, Math.abs(y[i]));
   }
-  // kısık/uzak konuşanı yükselt (en fazla 8 kat)
   const kazanc = tepe > 0 ? Math.min(8, 0.9 / tepe) : 1;
-  const buf = new ArrayBuffer(44 + m * 2), v = new DataView(buf);
+  const z = new Int16Array(m);
+  for (let i = 0; i < m; i++) z[i] = Math.max(-1, Math.min(1, y[i] * kazanc)) * 32767;
+  return z;
+}
+// IMA ADPCM WAV: 16 bit PCM'in dörtte biri boyut. Çin'den VPN üzerinden yükleme, söz başına
+// gecikmenin en büyük kalemiydi (6 sn'lik söz: 194 KB → 9–16 sn, ADPCM 49 KB → 2.5–4 sn)
+const IMA_ADIM = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
+  73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544,
+  598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327,
+  3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
+  18500, 20350, 22385, 24623, 27086, 29794, 32767];
+const IMA_INDEKS = [-1, -1, -1, -1, 2, 4, 6, 8];
+function adpcmWav(x) {
+  const BLOK = 512, ORNEK = (BLOK - 4) * 2 + 1;   // blok başına 1017 örnek
+  const bloklar = Math.max(1, Math.ceil(x.length / ORNEK)), veri = bloklar * BLOK;
+  const buf = new ArrayBuffer(60 + veri), v = new DataView(buf);
   const yaz = (i, s) => { for (let k = 0; k < s.length; k++) v.setUint8(i + k, s.charCodeAt(k)); };
-  yaz(0, 'RIFF'); v.setUint32(4, 36 + m * 2, true); yaz(8, 'WAVE'); yaz(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true);
-  v.setUint16(34, 16, true); yaz(36, 'data'); v.setUint32(40, m * 2, true);
-  for (let i = 0; i < m; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, y[i] * kazanc)) * 32767, true);
+  yaz(0, 'RIFF'); v.setUint32(4, 52 + veri, true); yaz(8, 'WAVE');
+  yaz(12, 'fmt '); v.setUint32(16, 20, true); v.setUint16(20, 0x11, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, Math.round(16000 * BLOK / ORNEK), true);
+  v.setUint16(32, BLOK, true); v.setUint16(34, 4, true); v.setUint16(36, 2, true); v.setUint16(38, ORNEK, true);
+  yaz(40, 'fact'); v.setUint32(44, 4, true); v.setUint32(48, x.length, true);
+  yaz(52, 'data'); v.setUint32(56, veri, true);
+  let indeks = 0;
+  for (let b = 0; b < bloklar; b++) {
+    const o = 60 + b * BLOK, bas = b * ORNEK;
+    let tahmin = x[bas] ?? 0;
+    v.setInt16(o, tahmin, true); v.setUint8(o + 2, indeks);
+    for (let i = 0; i < ORNEK - 1; i++) {
+      const adim = IMA_ADIM[indeks];
+      let fark = (x[bas + 1 + i] ?? 0) - tahmin, kod = 0, dq = adim >> 3;
+      if (fark < 0) { kod = 8; fark = -fark; }
+      if (fark >= adim) { kod |= 4; fark -= adim; dq += adim; }
+      if (fark >= adim >> 1) { kod |= 2; fark -= adim >> 1; dq += adim >> 1; }
+      if (fark >= adim >> 2) { kod |= 1; dq += adim >> 2; }
+      tahmin = Math.max(-32768, Math.min(32767, tahmin + (kod & 8 ? -dq : dq)));
+      indeks = Math.max(0, Math.min(88, indeks + IMA_INDEKS[kod & 7]));
+      const k = o + 4 + (i >> 1);
+      v.setUint8(k, i & 1 ? v.getUint8(k) | (kod << 4) : kod);
+    }
+  }
   return new Blob([buf], { type: 'audio/wav' });
 }
+const sesBlobu = (parcalar, sr) => adpcmWav(ornekle16k(parcalar, sr));
 
 // ---------------------------------------------------------------- yazıya döküm (ElevenLabs Scribe)
-async function fetchSure(url, opt, ms) {
+async function fetchSure(url, opt, ms, dis) {
   const ac = new AbortController();
   const z = setTimeout(() => ac.abort(), ms);
+  const kes = () => ac.abort();
+  sonIstek = Date.now();
+  dis?.addEventListener('abort', kes);
   try { return await fetch(url, { ...opt, signal: ac.signal }); }
-  finally { clearTimeout(z); }
+  finally { clearTimeout(z); dis?.removeEventListener('abort', kes); }
 }
-async function yaziyaDok(blob) {
+async function yaziyaDok(blob, dis) {
   if (KURU) {
-    await bekle(600);
-    const sn = ((blob.size - 44) / 32000).toFixed(1);
+    await bekle(KURU_STT_MS);
+    if (dis?.aborted) throw new DOMException('iptal', 'AbortError');
+    const sn = ((blob.size - 60) / 8060).toFixed(1);
     return Math.random() < 0.5 ? { metin: `测试句子，长度 ${sn} 秒。`, dil: 'zho' } : { metin: `Deneme cümlesi, ${sn} saniye.`, dil: 'tur' };
   }
   for (let deneme = 0; ; deneme++) {
     const fd = new FormData();
     fd.append('model_id', 'scribe_v2');
     fd.append('tag_audio_events', 'false');
-    fd.append('file', blob, 'soz.wav');
+    fd.append('file', blob, 'soz.wav');   // IMA ADPCM WAV (bkz. adpcmWav)
     try {
       const r = await fetchSure('https://api.elevenlabs.io/v1/speech-to-text',
-        { method: 'POST', headers: { 'xi-api-key': A.elevenKey }, body: fd }, 30000);
+        { method: 'POST', headers: { 'xi-api-key': A.elevenKey }, body: fd }, 30000, dis);
       if (!r.ok) {
         const t = (await r.text()).slice(0, 200);
         if (r.status === 401) throw new Error('ElevenLabs anahtarı geçersiz (Ayarlar)');
@@ -208,6 +265,7 @@ async function yaziyaDok(blob) {
       const d = await r.json();
       return { metin: (d.text || '').trim(), dil: d.language_code };
     } catch (e) {
+      if (dis?.aborted) throw e;
       if (deneme < 1 && (e.name === 'AbortError' || e instanceof TypeError)) continue;  // ağ kopması: bir kez daha
       if (e.name === 'AbortError') throw new Error('Yazıya döküm zaman aşımı (bağlantı yavaş)');
       if (e instanceof TypeError) throw new Error('ElevenLabs\'e bağlanılamadı (internet / VPN?)');
@@ -266,6 +324,7 @@ async function cevir(tur, s, guncelle) {
     }
     return;
   }
+  sonIstek = Date.now();
   const stream = istemci().beta.messages.stream({
     model: A.model,
     max_tokens: 1024,
@@ -396,12 +455,21 @@ const kendiSesimiz = metin => okunanlar.some(o => Date.now() - o.zaman < 30000 &
 const sesBellek = new Map();   // tekrar deneme ve birleştirme için ham ses (yalnızca bu oturum)
 // Yarım kalmış görünen söz: kişi kısa süre içinde devam ederse iki parça tek cümle olarak işlenir
 let acik = null;
-const DEVAM_SURESI = 1500;
+const DEVAM_SURESI = 1200;
+const erkenSonuc = new Map();   // tur.id → erken başlatılmış yazıya döküm (Promise; kayda girmez)
+function erkenYazi(parcalar, sr) {
+  const ac = new AbortController();
+  const sonuc = yaziyaDok(sesBlobu(parcalar, sr), ac.signal);
+  sonuc.catch(() => {});
+  istatistik.erken++;
+  return { sonuc, iptal: () => { ac.abort(); istatistik.iptal++; } };
+}
+const istatistik = { erken: 0, iptal: 0, kullanilan: 0 };
 const yarim = m => /[,，、:：;；]\s*$/.test(m)
   || /(^|\s)(ve|ama|fakat|ancak|çünkü|ile|veya|ya da|yani|ki|eğer|mesela)\s*$/i.test(m)
   || /(和|跟|但是|可是|而且|因为|所以|然后|就是|如果|比如|还有)\s*$/.test(m);
-async function sozGeldi(parcalar, sr, okurken = false) {
-  if (acik && acik.s === sohbet) {
+async function sozGeldi(parcalar, sr, okurken = false, hazir = null) {
+  if (acik && acik.s === sohbet) {   // önceki yarım sözle birleşiyor: erken sonuç bu sesi kapsamaz
     const { tur, coz } = acik;
     const once = sesBellek.get(tur.id);
     const ara = new Float32Array(Math.round(sr * 0.25));
@@ -415,6 +483,7 @@ async function sozGeldi(parcalar, sr, okurken = false) {
   const tur = { id: uid(), zaman: Date.now(), durum: 'yaziya', metin: '', ceviri: '', kaynak: null, sureler: {} };
   if (okurken) tur.okurken = true;
   sesBellek.set(tur.id, { parcalar, sr });
+  if (hazir) erkenSonuc.set(tur.id, hazir);
   sohbet.turlar.push(tur);
   turCiz(tur, true);
   await turuIsle(tur, sohbet);
@@ -437,8 +506,11 @@ async function turuIsle(tur, s) {
   try {
     if (!tur.metin) {
       tur.durum = 'yaziya'; ciz();
-      const ham = sesBellek.get(tur.id);
-      const r = await yaziyaDok(wav16k(ham.parcalar, ham.sr));
+      const ham = sesBellek.get(tur.id), hazir = erkenSonuc.get(tur.id);
+      erkenSonuc.delete(tur.id);
+      let r = null;
+      if (hazir) { try { r = await hazir; istatistik.kullanilan++; } catch {} }
+      if (!r) r = await yaziyaDok(sesBlobu(ham.parcalar, ham.sr));
       tur.sureler.yazi = Math.round(performance.now() - t0);
       if (anlamsiz(r.metin) || (tur.okurken && kendiSesimiz(r.metin))) { s.turlar = s.turlar.filter(x => x !== tur); if (gorunur()) turSil(tur); return; }
       tur.metin = r.metin;
@@ -548,8 +620,18 @@ function durumGoster(d) {
   document.body.dataset.durum = d;
 }
 let dinliyor = false, kilit = null;
+// VPN üzerinden her yeni bağlantının kurulumu (TLS) saniyeler alabiliyor: dinlerken iki API'ye
+// açık bir bağlantı tut ki konuşma bittiğinde istek hemen gitsin
+let isitZaman = null, sonIstek = 0;
+function isit() {
+  if (KURU) return;
+  sonIstek = Date.now();
+  istemci().models.retrieve(A.model).catch(() => {});
+  fetchSure('https://api.elevenlabs.io/v1/models', { headers: { 'xi-api-key': A.elevenKey } }, 15000).catch(() => {});
+}
 const dinleyici = new Dinleyici({
   onSoz: sozGeldi,
+  onErken: KURU && new URLSearchParams(location.search).get('erken') === '0' ? null : erkenYazi,
   onSeviye: s => document.body.style.setProperty('--seviye', s.toFixed(2)),
   onDurum: durumGoster,
 });
@@ -569,10 +651,13 @@ async function dinlemeyiBaslat(testTamponu) {
   dinliyor = true;
   document.body.classList.add('acik');
   durumGoster('dinliyor');
-  if (!KURU) istemci().models.retrieve(A.model).catch(() => {});   // bağlantıyı önceden ısıt
+  isit();
+  clearInterval(isitZaman);
+  isitZaman = setInterval(() => { if (dinliyor && Date.now() - sonIstek > 40000) isit(); }, 10000);
   try { kilit = await navigator.wakeLock?.request('screen'); } catch {}
 }
 async function dinlemeyiDurdur() {
+  clearInterval(isitZaman);
   dinleyici.zorla();
   await dinleyici.durdur();
   dinliyor = false;
@@ -746,6 +831,11 @@ speechSynthesis?.getVoices();   // bazı tarayıcılar listeyi geç yükler
 navigator.storage?.persist?.().catch(() => {});
 // yerel geliştirmede önbellek eski kodu göstermesin
 const yerel = ['localhost', '127.0.0.1'].includes(location.hostname);
-if ('serviceWorker' in navigator && !yerel) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && !yerel) {
+  // yeni sürüm yüklendiğinde (konuşma sürmüyorsa) sayfayı bir kez yenile ki eski kod kalmasın
+  const vardi = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (vardi && !dinliyor) location.reload(); });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+}
 if (!KURU && (!A.anthropicKey || !A.elevenKey)) setTimeout(() => ayarlariAc('Başlamak için Claude ve ElevenLabs anahtarlarını girin. Anahtarlar yalnızca bu telefonda saklanır.'), 300);
-window.__ceviri = { sohbet: () => sohbet, A: () => A };   // tanılama
+window.__ceviri = { sohbet: () => sohbet, A: () => A, istatistik };   // tanılama
